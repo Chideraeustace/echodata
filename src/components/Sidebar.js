@@ -1,5 +1,11 @@
 import React from "react";
-import { X, LayoutDashboard, Settings, Database } from "lucide-react";
+import {
+  X,
+  LayoutDashboard,
+  Database,
+  Users,
+  CircleDollarSign,
+} from "lucide-react";
 
 export default function Sidebar({
   isOpen,
@@ -8,8 +14,21 @@ export default function Sidebar({
   setActiveTab,
 }) {
   const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "pricing", label: "Bundle Pricing", icon: Settings },
+    {
+      id: "dashboard",
+      label: "Dashboard",
+      icon: LayoutDashboard, // Passed as reference
+    },
+    {
+      id: "pricing",
+      label: "Pricing Matrix",
+      icon: CircleDollarSign,
+    },
+    {
+      id: "contacts",
+      label: "Contacts",
+      icon: Users,
+    },
   ];
 
   return (
@@ -37,7 +56,7 @@ export default function Sidebar({
 
       <nav className="space-y-2">
         {menuItems.map((item) => {
-          const Icon = item.icon;
+          const Icon = item.icon; // Now valid as a component
           return (
             <button
               key={item.id}
@@ -52,7 +71,7 @@ export default function Sidebar({
               }`}
             >
               <Icon size={20} />
-              {item.label}
+              <span className="font-medium text-sm">{item.label}</span>
             </button>
           );
         })}

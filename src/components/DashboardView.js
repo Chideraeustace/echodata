@@ -7,6 +7,7 @@ import {
   BarChart3,
   Wallet,
   RefreshCcw,
+  Zap,
 } from "lucide-react";
 
 export default function DashboardView() {
@@ -15,6 +16,10 @@ export default function DashboardView() {
     todaysOrders: 0,
     totalRevenue: 0,
     totalOrders: 0,
+    // Moolre specific stats
+    moolreDailyRev: 0,
+    moolreTotalRev: 0,
+    moolreTotalOrders: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -24,36 +29,65 @@ export default function DashboardView() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Define Queries
+      // --- Queries for echodata_purchases ---
       const dailyQ = query(
         collection(db, "echodata_purchases"),
         where("status", "==", "success"),
         where("createdAt", ">=", today),
       );
-
       const totalQ = query(
         collection(db, "echodata_purchases"),
         where("status", "==", "success"),
       );
 
-      // Parallel execution for speed
-      const [dailySnap, totalSnap] = await Promise.all([
-        getDocs(dailyQ),
-        getDocs(totalQ),
-      ]);
+      // --- Queries for echo_sales (Moolre) ---
+      const moolreDailyQ = query(
+        collection(db, "echo_sales"),
+        where("status", "==", "success"),
+        where("createdAt", ">=", today),
+      );
+      const moolreTotalQ = query(
+        collection(db, "echo_sales"),
+        where("status", "==", "success"),
+      );
 
-      // Calculate Metrics
-      let dailyRev = 0;
-      dailySnap.forEach((doc) => (dailyRev += Number(doc.data().amount || 0)));
+      // Execute all 4 fetches in parallel
+      const [snapDaily, snapTotal, snapMoolreDaily, snapMoolreTotal] =
+        await Promise.all([
+          getDocs(dailyQ),
+          getDocs(totalQ),
+          getDocs(moolreDailyQ),
+          getDocs(moolreTotalQ),
+        ]);
 
-      let totalRev = 0;
-      totalSnap.forEach((doc) => (totalRev += Number(doc.data().amount || 0)));
+      // Calculate primary stats
+      let revDaily = 0;
+      snapDaily.forEach((d) => (revDaily += Number(d.data().amount || 0)));
+
+      let revTotal = 0;
+      snapTotal.forEach((d) => (revTotal += Number(d.data().amount || 0)));
+
+      // Calculate Moolre stats
+      let mRevDaily = 0;
+      snapMoolreDaily.forEach(
+        (d) => (mRevDaily += Number(d.data().amount || 0)),
+      );
+
+      let mRevTotal = 0;
+      snapMoolreTotal.forEach(
+        (d) => (mRevTotal += Number(d.data().amount || 0)),
+      );
 
       setStats({
-        dailyRevenue: dailyRev.toFixed(2),
-        todaysOrders: dailySnap.size,
-        totalRevenue: totalRev.toFixed(2),
-        totalOrders: totalSnap.size,
+        // Combined Totals for top cards
+        dailyRevenue: (revDaily).toFixed(2),
+        todaysOrders: snapDaily.size ,
+        totalRevenue: (revTotal).toFixed(2),
+        totalOrders: snapTotal.size,
+        // Specific Moolre breakdown
+        moolreDailyRev: mRevDaily.toFixed(2),
+        moolreTotalRev: mRevTotal.toFixed(2),
+        moolreTotalOrders: snapMoolreTotal.size,
       });
     } catch (err) {
       console.error("Fetch error:", err);
@@ -70,44 +104,48 @@ export default function DashboardView() {
     return (
       <div className="p-8 text-slate-400 animate-pulse flex flex-col items-center justify-center min-h-[400px]">
         <RefreshCcw className="animate-spin mb-4" size={32} />
-        <p>Updating metrics...</p>
+        <p className="font-medium tracking-tight">
+          Syncing multi-channel data...
+        </p>
       </div>
     );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-            Overview
+            Admin Dashboard
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Transaction performance snapshot.
+            Real-time aggregate from EchoData and Moolre channels.
           </p>
         </div>
         <button
           onClick={fetchStats}
-          className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+          className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-all active:scale-95"
         >
           <RefreshCcw size={20} />
         </button>
       </div>
 
+      {/* Primary Combined Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          label="Today's Revenue"
+          label="Aggregate Daily Rev"
           value={`GH¢ ${stats.dailyRevenue}`}
           icon={<DollarSign size={20} />}
           color="emerald"
         />
         <StatCard
-          label="Today's Orders"
+          label="Today's Total Orders"
           value={stats.todaysOrders}
           icon={<ShoppingBag size={20} />}
           color="blue"
         />
         <StatCard
-          label="Total Revenue"
+          label="All-Time Revenue"
           value={`GH¢ ${stats.totalRevenue}`}
           icon={<Wallet size={20} />}
           color="purple"
@@ -118,6 +156,45 @@ export default function DashboardView() {
           icon={<BarChart3 size={20} />}
           color="amber"
         />
+      </div>
+
+      {/* Dedicated Moolre Section */}
+      <div className="pt-6 border-t border-slate-800/60">
+        <div className="flex items-center gap-2 mb-6">
+          <div className="p-1.5 bg-orange-500/10 rounded-lg">
+            <Zap size={18} className="text-orange-500" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-200">
+            Moolre Channel (echo_sales)
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-slate-950/20 border border-slate-800/40 rounded-2xl p-5 shadow-sm">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              Moolre Daily
+            </span>
+            <h3 className="text-xl font-bold text-slate-200 mt-2">
+              GH¢ {stats.moolreDailyRev}
+            </h3>
+          </div>
+          <div className="bg-slate-950/20 border border-slate-800/40 rounded-2xl p-5 shadow-sm">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              Moolre Total Revenue
+            </span>
+            <h3 className="text-xl font-bold text-slate-200 mt-2">
+              GH¢ {stats.moolreTotalRev}
+            </h3>
+          </div>
+          <div className="bg-slate-950/20 border border-slate-800/40 rounded-2xl p-5 shadow-sm">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              Moolre Total Sales
+            </span>
+            <h3 className="text-xl font-bold text-slate-200 mt-2">
+              {stats.moolreTotalOrders} orders
+            </h3>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -131,7 +208,7 @@ function StatCard({ label, value, icon, color }) {
     amber: "text-amber-400 bg-amber-500/10 border-amber-500/20",
   };
   return (
-    <div className="bg-slate-950/40 border border-slate-800/60 rounded-2xl p-5 shadow-xl backdrop-blur-md">
+    <div className="bg-slate-950/40 border border-slate-800/60 rounded-2xl p-5 shadow-xl backdrop-blur-md hover:border-slate-700/80 transition-colors">
       <div className="flex justify-between items-start">
         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
           {label}

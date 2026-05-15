@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import DashboardView from "./components/DashboardView";
 import PricingView from "./components/PricingView";
+import ContactManagementView from "./components/ContactManagementView"; // 1. Import
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -32,10 +33,13 @@ function App() {
             </div>
           </div>
         </header>
+        {/* ... Header stays the same ... */}
 
         <main className="p-6 md:p-8 max-w-7xl w-full mx-auto space-y-8 flex-1">
           {activeTab === "dashboard" && <DashboardView />}
           {activeTab === "pricing" && <PricingView />}
+          {activeTab === "contacts" && <ContactManagementView />}{" "}
+          {/* 2. Add Condition */}
         </main>
       </div>
     </div>
