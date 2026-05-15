@@ -10,6 +10,7 @@ import {
   writeBatch,
   getCountFromServer,
   doc,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -20,8 +21,9 @@ import {
   Users,
   RefreshCcw,
   ShieldCheck,
+  Plus,
 } from "lucide-react";
-import * as XLSX from "xlsx"; // You'll need to run: npm install xlsx
+import * as XLSX from "xlsx";
 
 export default function ContactManagementView() {
   const [contacts, setContacts] = useState([]);
@@ -30,13 +32,17 @@ export default function ContactManagementView() {
   const [whitelistCount, setWhitelistCount] = useState(0);
   const [uploading, setUploading] = useState(false);
 
+  // New state for single whitelist input
+  const [singleNumber, setSingleNumber] = useState("");
+  const [addingSingle, setAddingSingle] = useState(false);
+
   // 1. Fetch Contacts
   const fetchContacts = useCallback(async (search = "") => {
     setLoading(true);
     try {
-        const whitelistColl = collection(db, "echowhitelist");
-        const countSnapshot = await getCountFromServer(whitelistColl);
-        setWhitelistCount(countSnapshot.data().count);
+      const whitelistColl = collection(db, "echowhitelist");
+      const countSnapshot = await getCountFromServer(whitelistColl);
+      setWhitelistCount(countSnapshot.data().count);
 
       let q;
       const contactsRef = collection(db, "echodata_purchases");
@@ -81,7 +87,34 @@ export default function ContactManagementView() {
     URL.revokeObjectURL(url);
   };
 
-  // 3. Handle Whitelist File Upload (CSV, XLSX, TXT)
+  // 3. Handle Single Number Submission
+  const handleSingleUpload = async (e) => {
+    e.preventDefault();
+    const cleanNumber = singleNumber.trim();
+    if (!cleanNumber) return;
+
+    setAddingSingle(true);
+    try {
+      // Using the phone number as the Firestore document ID directly
+      const docRef = doc(db, "echowhitelist", cleanNumber);
+      await setDoc(docRef, {
+        phoneNumber: cleanNumber,
+        addedAt: serverTimestamp(),
+        source: "single_input",
+      });
+
+      setSingleNumber("");
+      alert(`${cleanNumber} has been successfully whitelisted!`);
+      // Refresh component stats to reflect changes
+      fetchContacts(searchTerm);
+    } catch (err) {
+      alert("Failed to whitelist number: " + err.message);
+    } finally {
+      setAddingSingle(false);
+    }
+  };
+
+  // 4. Handle Whitelist File Upload (CSV, XLSX, TXT)
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -109,7 +142,6 @@ export default function ContactManagementView() {
             .filter((n) => n)
             .map((n) => String(n).trim());
         } else {
-          // Plain TXT processing
           numbers = evt.target.result
             .split(/\r?\n/)
             .filter((n) => n.trim())
@@ -119,8 +151,9 @@ export default function ContactManagementView() {
         // Firestore Batch Upload
         const batch = writeBatch(db);
         numbers.forEach((num) => {
-          const newDocRef = doc(collection(db, "echowhitelist"));
-          batch.set(newDocRef, {
+          // Setting the phone number as the doc ID inside the batch process
+          const docRef = doc(db, "echowhitelist", num);
+          batch.set(docRef, {
             phoneNumber: num,
             addedAt: serverTimestamp(),
             source: "bulk_upload",
@@ -129,11 +162,12 @@ export default function ContactManagementView() {
 
         await batch.commit();
         alert(`Successfully whitelisted ${numbers.length} contacts!`);
+        fetchContacts(searchTerm);
       } catch (err) {
         alert("Upload failed: " + err.message);
       } finally {
         setUploading(false);
-        e.target.value = null; // Reset input
+        e.target.value = null; // Reset file input
       }
     };
 
@@ -147,43 +181,74 @@ export default function ContactManagementView() {
   return (
     <div className="space-y-8">
       {/* Header & Stats */}
-      <div className="flex flex-col md:flex-row justify-between gap-6">
-        <div>
-          <h1 className="text-2xl font-extrabold flex items-center gap-2">
-            <Users className="text-blue-500" /> Contact Management
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Total Unique Contacts Found:{" "}
-            <span className="text-white font-bold">{contacts.length}</span>
-          </p>
-        </div>
-        <div className="pl-6 border-l border-slate-800">
-          <h2 className="text-2xl font-extrabold flex items-center gap-2">
-            <ShieldCheck className="text-emerald-500" /> Whitelist
-          </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Total Members:{" "}
-            <span className="text-emerald-400 font-bold">{whitelistCount}</span>
-          </p>
+      <div className="flex flex-col lg:flex-row justify-between gap-6 items-start lg:items-center">
+        <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center w-full lg:w-auto">
+          <div>
+            <h1 className="text-2xl font-extrabold flex items-center gap-2">
+              <Users className="text-blue-500" /> Contact Management
+            </h1>
+            <p className="text-sm text-slate-400 mt-1">
+              Total Unique Contacts Found:{" "}
+              <span className="text-white font-bold">{contacts.length}</span>
+            </p>
+          </div>
+          <div className="sm:pl-6 sm:border-l border-slate-800">
+            <h2 className="text-2xl font-extrabold flex items-center gap-2">
+              <ShieldCheck className="text-emerald-500" /> Whitelist
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Total Members:{" "}
+              <span className="text-emerald-400 font-bold">
+                {whitelistCount}
+              </span>
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Actions Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+          {/* Quick Single Add Form */}
+          <form
+            onSubmit={handleSingleUpload}
+            className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-2 py-1 focus-within:border-emerald-500/50 transition-all"
+          >
+            <input
+              type="text"
+              placeholder="Quick whitelist number..."
+              value={singleNumber}
+              onChange={(e) => setSingleNumber(e.target.value)}
+              disabled={addingSingle}
+              className="bg-transparent px-2 py-1 text-sm outline-none w-full sm:w-48 text-slate-200"
+            />
+            <button
+              type="submit"
+              disabled={addingSingle || !singleNumber.trim()}
+              className="p-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 rounded-lg text-white transition-colors"
+            >
+              {addingSingle ? (
+                <RefreshCcw size={14} className="animate-spin" />
+              ) : (
+                <Plus size={14} />
+              )}
+            </button>
+          </form>
+
           {/* Export Button */}
           <button
             onClick={exportToTxt}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm transition-colors"
           >
             <Download size={16} /> Export TXT
           </button>
 
           {/* Upload Whitelist Button */}
-          <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold cursor-pointer transition-all">
+          <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold cursor-pointer transition-all">
             {uploading ? (
               <RefreshCcw className="animate-spin" size={16} />
             ) : (
               <Upload size={16} />
             )}
-            Whitelist Upload
+            Bulk Upload
             <input
               type="file"
               className="hidden"
@@ -203,7 +268,7 @@ export default function ContactManagementView() {
         />
         <input
           type="text"
-          placeholder="Search by number..."
+          placeholder="Search purchases by number..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && fetchContacts(searchTerm)}
