@@ -32,9 +32,20 @@ export default function ContactManagementView() {
   const [whitelistCount, setWhitelistCount] = useState(0);
   const [uploading, setUploading] = useState(false);
 
-  // New state for single whitelist input
   const [singleNumber, setSingleNumber] = useState("");
   const [addingSingle, setAddingSingle] = useState(false);
+
+  // Helper function to validate and format phone numbers to 233 format
+  const formatTo233 = (numStr) => {
+    let clean = String(numStr).replace(/\D/g, "").trim(); // Remove any non-numeric characters
+
+    if (clean.startsWith("233")) {
+      return clean;
+    } else if (clean.startsWith("0")) {
+      return "233" + clean.substring(1);
+    }
+    return null; // Invalid format
+  };
 
   // 1. Fetch Contacts
   const fetchContacts = useCallback(async (search = "") => {
@@ -87,25 +98,29 @@ export default function ContactManagementView() {
     URL.revokeObjectURL(url);
   };
 
-  // 3. Handle Single Number Submission
+  // 3. Handle Single Number Submission with 233 Check
   const handleSingleUpload = async (e) => {
     e.preventDefault();
-    const cleanNumber = singleNumber.trim();
-    if (!cleanNumber) return;
+    const validatedNumber = formatTo233(singleNumber);
+
+    if (!validatedNumber) {
+      alert(
+        "Invalid format! Number must start with 233 or a valid local 0 digit.",
+      );
+      return;
+    }
 
     setAddingSingle(true);
     try {
-      // Using the phone number as the Firestore document ID directly
-      const docRef = doc(db, "echowhitelist", cleanNumber);
+      const docRef = doc(db, "echowhitelist", validatedNumber);
       await setDoc(docRef, {
-        phoneNumber: cleanNumber,
+        phoneNumber: validatedNumber,
         addedAt: serverTimestamp(),
         source: "single_input",
       });
 
       setSingleNumber("");
-      alert(`${cleanNumber} has been successfully whitelisted!`);
-      // Refresh component stats to reflect changes
+      alert(`${validatedNumber} successfully added to whitelist!`);
       fetchContacts(searchTerm);
     } catch (err) {
       alert("Failed to whitelist number: " + err.message);
@@ -114,7 +129,7 @@ export default function ContactManagementView() {
     }
   };
 
-  // 4. Handle Whitelist File Upload (CSV, XLSX, TXT)
+  // 4. Handle Whitelist Bulk File Upload with 233 Processing
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -124,7 +139,7 @@ export default function ContactManagementView() {
 
     reader.onload = async (evt) => {
       try {
-        let numbers = [];
+        let rawNumbers = [];
         const filename = file.name.toLowerCase();
 
         if (
@@ -137,21 +152,34 @@ export default function ContactManagementView() {
           const data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
             header: 1,
           });
-          numbers = data
-            .flat()
-            .filter((n) => n)
-            .map((n) => String(n).trim());
+          rawNumbers = data.flat();
         } else {
-          numbers = evt.target.result
-            .split(/\r?\n/)
-            .filter((n) => n.trim())
-            .map((n) => n.trim());
+          rawNumbers = evt.target.result.split(/\r?\n/);
+        }
+
+        // Process and filter valid numbers synchronously
+        const validNumbers = [];
+        let skippedCount = 0;
+
+        rawNumbers.forEach((raw) => {
+          if (!raw) return;
+          const formatted = formatTo233(raw);
+          if (formatted) {
+            validNumbers.push(formatted);
+          } else {
+            skippedCount++;
+          }
+        });
+
+        if (validNumbers.length === 0) {
+          alert("No valid numbers starting with 233 or 0 found in the file.");
+          setUploading(false);
+          return;
         }
 
         // Firestore Batch Upload
         const batch = writeBatch(db);
-        numbers.forEach((num) => {
-          // Setting the phone number as the doc ID inside the batch process
+        validNumbers.forEach((num) => {
           const docRef = doc(db, "echowhitelist", num);
           batch.set(docRef, {
             phoneNumber: num,
@@ -161,13 +189,19 @@ export default function ContactManagementView() {
         });
 
         await batch.commit();
-        alert(`Successfully whitelisted ${numbers.length} contacts!`);
+
+        let reportMsg = `Successfully processed file!\n- Whitelisted: ${validNumbers.length} contacts.`;
+        if (skippedCount > 0) {
+          reportMsg += `\n- Skipped: ${skippedCount} entries due to invalid numbering format.`;
+        }
+        alert(reportMsg);
+
         fetchContacts(searchTerm);
       } catch (err) {
         alert("Upload failed: " + err.message);
       } finally {
         setUploading(false);
-        e.target.value = null; // Reset file input
+        e.target.value = null;
       }
     };
 
@@ -214,11 +248,11 @@ export default function ContactManagementView() {
           >
             <input
               type="text"
-              placeholder="Quick whitelist number..."
+              placeholder="e.g. 233549856098 or 0549..."
               value={singleNumber}
               onChange={(e) => setSingleNumber(e.target.value)}
               disabled={addingSingle}
-              className="bg-transparent px-2 py-1 text-sm outline-none w-full sm:w-48 text-slate-200"
+              className="bg-transparent px-2 py-1 text-sm outline-none w-full sm:w-48 text-slate-200 placeholder:text-slate-600"
             />
             <button
               type="submit"
