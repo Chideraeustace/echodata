@@ -5,6 +5,7 @@ import {
   Database,
   Users,
   CircleDollarSign,
+  ShieldCheck, // Imported for Agent Management branding
 } from "lucide-react";
 
 export default function Sidebar({
@@ -17,7 +18,12 @@ export default function Sidebar({
     {
       id: "dashboard",
       label: "Dashboard",
-      icon: LayoutDashboard, // Passed as reference
+      icon: LayoutDashboard,
+    },
+    {
+      id: "agents",
+      label: "Agent Management", // New navigation configuration
+      icon: ShieldCheck,
     },
     {
       id: "pricing",
@@ -56,7 +62,7 @@ export default function Sidebar({
 
       <nav className="space-y-2">
         {menuItems.map((item) => {
-          const Icon = item.icon; // Now valid as a component
+          const Icon = item.icon;
           return (
             <button
               key={item.id}
