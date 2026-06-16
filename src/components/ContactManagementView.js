@@ -5,7 +5,6 @@ import {
   getDocs,
   limit,
   orderBy,
-  where,
   serverTimestamp,
   writeBatch,
   getCountFromServer,
@@ -14,7 +13,6 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
-  Search,
   Phone,
   Download,
   Upload,
@@ -22,12 +20,17 @@ import {
   RefreshCcw,
   ShieldCheck,
   Plus,
+  ShoppingBag,
+  UserCheck,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function ContactManagementView() {
-  const [contacts, setContacts] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
+  // State for metrics & data readiness
+  const [purchaseContacts, setPurchaseContacts] = useState([]);
+  const [salesContacts, setSalesContacts] = useState([]);
+  const [agentContacts, setAgentContacts] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [whitelistCount, setWhitelistCount] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -37,68 +40,91 @@ export default function ContactManagementView() {
 
   // Helper function to validate and format phone numbers to 233 format
   const formatTo233 = (numStr) => {
-    let clean = String(numStr).replace(/\D/g, "").trim(); // Remove any non-numeric characters
-
+    let clean = String(numStr).replace(/\D/g, "").trim();
     if (clean.startsWith("233")) {
       return clean;
     } else if (clean.startsWith("0")) {
       return "233" + clean.substring(1);
     }
-    return null; // Invalid format
+    return null;
   };
 
-  // 1. Fetch Contacts
-  const fetchContacts = useCallback(async (search = "") => {
+  // Fetch data pools for preparing exports
+  const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
+      // 1. Fetch Whitelist Count
       const whitelistColl = collection(db, "echowhitelist");
       const countSnapshot = await getCountFromServer(whitelistColl);
       setWhitelistCount(countSnapshot.data().count);
 
-      let q;
-      const contactsRef = collection(db, "echodata_purchases");
-      if (search) {
-        q = query(contactsRef, where("phoneNumber", "==", search), limit(50));
-      } else {
-        q = query(contactsRef, orderBy("createdAt", "desc"), limit(200));
-      }
-
-      const snap = await getDocs(q);
-      const unique = [];
-      const seen = new Set();
-
-      snap.forEach((doc) => {
+      // 2. Fetch Purchases (extracting phoneNumber)
+      const purchasesRef = collection(db, "echodata_purchases");
+      const purchaseQ = query(
+        purchasesRef,
+        orderBy("createdAt", "desc"),
+        limit(500),
+      );
+      const purchaseSnap = await getDocs(purchaseQ);
+      const uniquePurchases = new Set();
+      purchaseSnap.forEach((doc) => {
         const data = doc.data();
-        if (!seen.has(data.phoneNumber)) {
-          seen.add(data.phoneNumber);
-          unique.push({ id: doc.id, ...data });
-        }
+        if (data.phoneNumber)
+          uniquePurchases.add(
+            formatTo233(data.phoneNumber) || data.phoneNumber,
+          );
       });
-      setContacts(unique);
+      setPurchaseContacts(Array.from(uniquePurchases));
+
+      // 3. Fetch Sales (extracting payerPhone)
+      const salesRef = collection(db, "echo_sales");
+      const salesQ = query(salesRef, orderBy("createdAt", "desc"), limit(500));
+      const salesSnap = await getDocs(salesQ);
+      const uniqueSales = new Set();
+      salesSnap.forEach((doc) => {
+        const data = doc.data();
+        if (data.payerPhone)
+          uniqueSales.add(formatTo233(data.payerPhone) || data.payerPhone);
+      });
+      setSalesContacts(Array.from(uniqueSales));
+
+      // 4. Fetch Agents (extracting phone)
+      const agentsRef = collection(db, "echoagents");
+      const agentsSnap = await getDocs(agentsRef); // Typically fewer agents; pulling without limit fallback
+      const uniqueAgents = new Set();
+      agentsSnap.forEach((doc) => {
+        const data = doc.data();
+        if (data.phone) uniqueAgents.add(formatTo233(data.phone) || data.phone);
+      });
+      setAgentContacts(Array.from(uniqueAgents));
     } catch (err) {
-      console.error(err);
+      console.error("Error aggregating export contacts: ", err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchContacts();
-  }, [fetchContacts]);
+    fetchAllData();
+  }, [fetchAllData]);
 
-  // 2. Export Contacts to TXT
-  const exportToTxt = () => {
-    const phoneNumbers = contacts.map((c) => c.phoneNumber).join("\n");
+  // Unified export utility handler
+  const exportToTxt = (dataset, filenameLabel) => {
+    if (dataset.length === 0) {
+      alert("No numbers compiled to export for this category.");
+      return;
+    }
+    const phoneNumbers = dataset.join("\n");
     const blob = new Blob([phoneNumbers], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `echodata_contacts_${new Date().toISOString().split("T")[0]}.txt`;
+    link.download = `${filenameLabel}_export_${new Date().toISOString().split("T")[0]}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
-  // 3. Handle Single Number Submission with 233 Check
+  // Handle Single Number Submission with 233 Check
   const handleSingleUpload = async (e) => {
     e.preventDefault();
     const validatedNumber = formatTo233(singleNumber);
@@ -121,7 +147,7 @@ export default function ContactManagementView() {
 
       setSingleNumber("");
       alert(`${validatedNumber} successfully added to whitelist!`);
-      fetchContacts(searchTerm);
+      fetchAllData();
     } catch (err) {
       alert("Failed to whitelist number: " + err.message);
     } finally {
@@ -129,7 +155,7 @@ export default function ContactManagementView() {
     }
   };
 
-  // 4. Handle Whitelist Bulk File Upload with 233 Processing
+  // Handle Whitelist Bulk File Upload with 233 Processing
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -157,7 +183,6 @@ export default function ContactManagementView() {
           rawNumbers = evt.target.result.split(/\r?\n/);
         }
 
-        // Process and filter valid numbers synchronously
         const validNumbers = [];
         let skippedCount = 0;
 
@@ -196,7 +221,7 @@ export default function ContactManagementView() {
         }
         alert(reportMsg);
 
-        fetchContacts(searchTerm);
+        fetchAllData();
       } catch (err) {
         alert("Upload failed: " + err.message);
       } finally {
@@ -213,42 +238,29 @@ export default function ContactManagementView() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header & Stats */}
-      <div className="flex flex-col lg:flex-row justify-between gap-6 items-start lg:items-center">
-        <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center w-full lg:w-auto">
-          <div>
-            <h1 className="text-2xl font-extrabold flex items-center gap-2">
-              <Users className="text-blue-500" /> Contact Management
-            </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Total Unique Contacts Found:{" "}
-              <span className="text-white font-bold">{contacts.length}</span>
-            </p>
-          </div>
-          <div className="sm:pl-6 sm:border-l border-slate-800">
-            <h2 className="text-2xl font-extrabold flex items-center gap-2">
-              <ShieldCheck className="text-emerald-500" /> Whitelist
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">
-              Total Members:{" "}
-              <span className="text-emerald-400 font-bold">
-                {whitelistCount}
-              </span>
-            </p>
-          </div>
+    <div className="space-y-8 p-6 max-w-7xl mx-auto text-slate-100">
+      {/* Upper Control Panel */}
+      <div className="flex flex-col lg:flex-row justify-between gap-6 items-start lg:items-center border-b border-slate-800 pb-6">
+        <div>
+          <h1 className="text-2xl font-extrabold flex items-center gap-2">
+            <Users className="text-blue-500" /> Data Exporter & Whitelisting
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Data aggregates running in the background. Ready for immediate
+            exports.
+          </p>
         </div>
 
-        {/* Actions Bar */}
+        {/* Global Action Tools */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-          {/* Quick Single Add Form */}
+          {/* Quick Single Whitelist System */}
           <form
             onSubmit={handleSingleUpload}
             className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-2 py-1 focus-within:border-emerald-500/50 transition-all"
           >
             <input
               type="text"
-              placeholder="e.g. 233549856098 or 0549..."
+              placeholder="Whitelist e.g. 0549..."
               value={singleNumber}
               onChange={(e) => setSingleNumber(e.target.value)}
               disabled={addingSingle}
@@ -267,14 +279,6 @@ export default function ContactManagementView() {
             </button>
           </form>
 
-          {/* Export Button */}
-          <button
-            onClick={exportToTxt}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm transition-colors"
-          >
-            <Download size={16} /> Export TXT
-          </button>
-
           {/* Upload Whitelist Button */}
           <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold cursor-pointer transition-all">
             {uploading ? (
@@ -282,7 +286,7 @@ export default function ContactManagementView() {
             ) : (
               <Upload size={16} />
             )}
-            Bulk Upload
+            Bulk Whitelist
             <input
               type="file"
               className="hidden"
@@ -294,55 +298,114 @@ export default function ContactManagementView() {
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="max-w-md relative">
-        <Search
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
-          size={18}
-        />
-        <input
-          type="text"
-          placeholder="Search purchases by number..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && fetchContacts(searchTerm)}
-          className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl outline-none focus:border-blue-500 transition-all text-sm"
-        />
-      </div>
-
-      {/* Contacts Grid */}
+      {/* Monitoring Section & Export Engines */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className="h-28 bg-slate-800/30 animate-pulse rounded-2xl border border-slate-800"
+              className="h-32 bg-slate-800/30 animate-pulse rounded-2xl border border-slate-800"
             />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {contacts.map((contact) => (
-            <div
-              key={contact.id}
-              className="bg-slate-950/40 border border-slate-800/60 p-5 rounded-2xl flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
-                  <Phone size={18} />
-                </div>
-                <div>
-                  <p className="font-bold text-slate-100">
-                    {contact.phoneNumber}
-                  </p>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-tighter">
-                    Last activity:{" "}
-                    {contact.createdAt?.toDate().toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Whitelist Tracker Card */}
+          <div className="bg-slate-950/40 border border-emerald-800/40 p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 font-medium text-sm">
+                Whitelist Database
+              </span>
+              <ShieldCheck className="text-emerald-500" size={22} />
             </div>
-          ))}
+            <div className="mt-4">
+              <h3 className="text-3xl font-black text-emerald-400">
+                {whitelistCount}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Total live Whitelisted records
+              </p>
+            </div>
+          </div>
+
+          {/* Purchases Export Card */}
+          <div className="bg-slate-950/40 border border-slate-800 p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 font-medium text-sm">
+                UzoCode Contacts
+              </span>
+              <Phone className="text-blue-500" size={20} />
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <h3 className="text-3xl font-black text-slate-100">
+                  {purchaseContacts.length}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Field: phoneNumber
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  exportToTxt(purchaseContacts, "purchases_contacts")
+                }
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors text-blue-400"
+                title="Export Purchases to TXT"
+              >
+                <Download size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Sales Export Card */}
+          <div className="bg-slate-950/40 border border-slate-800 p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 font-medium text-sm">
+                MoolreCode Contacts
+              </span>
+              <ShoppingBag className="text-amber-500" size={20} />
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <h3 className="text-3xl font-black text-slate-100">
+                  {salesContacts.length}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Field: payerPhone</p>
+              </div>
+              <button
+                onClick={() => exportToTxt(salesContacts, "sales_contacts")}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors text-amber-400"
+                title="Export Sales to TXT"
+              >
+                <Download size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Agent Export Card */}
+          <div className="bg-slate-950/40 border border-slate-800 p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 font-medium text-sm">
+                Agent Contacts
+              </span>
+              <UserCheck className="text-purple-500" size={20} />
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <h3 className="text-3xl font-black text-slate-100">
+                  {agentContacts.length}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Field: phone</p>
+              </div>
+              <button
+                onClick={() => exportToTxt(agentContacts, "agents_contacts")}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors text-purple-400"
+                title="Export Agents to TXT"
+              >
+                <Download size={18} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
