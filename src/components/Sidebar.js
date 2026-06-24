@@ -5,7 +5,8 @@ import {
   Database,
   Users,
   CircleDollarSign,
-  ShieldCheck, // Imported for Agent Management branding
+  ShieldCheck,
+  Workflow, // Imported for Data Routing representation
 } from "lucide-react";
 
 export default function Sidebar({
@@ -22,8 +23,13 @@ export default function Sidebar({
     },
     {
       id: "agents",
-      label: "Agent Management", // New navigation configuration
+      label: "Agent Management",
       icon: ShieldCheck,
+    },
+    {
+      id: "routing",
+      label: "Data Routing", // New Data Routing section
+      icon: Workflow,
     },
     {
       id: "pricing",

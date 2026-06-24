@@ -24,6 +24,7 @@ import DashboardView from "./components/DashboardView";
 import PricingView from "./components/PricingView";
 import ContactManagementView from "./components/ContactManagementView";
 import AgentManagement from "./components/AgentManagement";
+import DataRouting from "./components/DataRouting"; // Import the new DataRouting component
 
 function App() {
   const [adminUser, setAdminUser] = useState(null);
@@ -284,6 +285,7 @@ function App() {
           {activeTab === "pricing" && <PricingView />}
           {activeTab === "contacts" && <ContactManagementView />}
           {activeTab === "agents" && <AgentManagement />}
+          {activeTab === "routing" && <DataRouting />}
         </main>
       </div>
     </div>
