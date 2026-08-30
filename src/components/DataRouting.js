@@ -35,6 +35,13 @@ export default function DataRouting() {
         "Converts sizes into Megabytes (MB) automatically before sending them out.",
       label: "Alternative Option",
     },
+    {
+      id: "brooks",
+      name: "Brooks Hub",
+      description:
+        "Routes orders through BrooksHub using package IDs matched to network and size.",
+      label: "New Option",
+    },
   ];
 
   // Load active setting from Firestore using v9+ syntax on page open
